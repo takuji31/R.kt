@@ -16,10 +16,10 @@ import javax.tools.Diagnostic
 class RProcessor : AbstractProcessor() {
     override fun process(annotations: MutableSet<out TypeElement>, roundEnv: RoundEnvironment): Boolean {
 
-        val generatedDir = processingEnv.options["kapt.kotlin.generated"] ?: throw IllegalStateException("SuperR needs kapt support.")
+        val generatedDir = processingEnv.options["kapt.kotlin.generated"] ?: throw IllegalStateException("R.kt needs kapt support.")
         val pattern = "(.+/build/generated/source/)".toRegex()
         val buildVariant = File(generatedDir).name
-        val sourceDir = pattern.find(generatedDir)?.groupValues?.get(0) ?: throw IllegalStateException("SuperR needs gradle build environment")
+        val sourceDir = pattern.find(generatedDir)?.groupValues?.get(0) ?: throw IllegalStateException("R.kt needs gradle build environment")
 
         val buildConfigDir = FileUtils.getFile(sourceDir, "buildConfig", buildVariant)
         val buildConfigFile = FileUtils.listFiles(buildConfigDir, arrayOf("java"), true).firstOrNull { it.name == "BuildConfig.java" }
@@ -35,34 +35,40 @@ class RProcessor : AbstractProcessor() {
 
         val rClass = roundEnv.rootElements.firstOrNull { (it as? TypeElement)?.qualifiedName?.toString() == packageName + ".R" } ?: return true
 
-        val rKtClassName = ClassName.bestGuess("jp.takuji31.rkt.BaseR")
-        val rKtClass = TypeSpec.classBuilder(ClassName.bestGuess("$packageName.RKt"))
-            .superclass(rKtClassName)
+        val baseRClassName = ClassName.bestGuess("jp.takuji31.rkt.BaseR")
+        val rClassName = ClassName.bestGuess("$packageName.RKt")
+        val rKtClass = TypeSpec.classBuilder(rClassName)
+            .superclass(baseRClassName)
+            .primaryConstructor(
+                FunSpec
+                    .constructorBuilder()
+                    .addParameter(
+                        ParameterSpec.builder("context", Context::class)
+                            .build()
+                    )
+                    .build()
+            )
+            .addSuperclassConstructorParameter("context = context")
 
         rClass.enclosedElements.firstOrNull { element -> element is TypeElement && element.kind == ElementKind.CLASS && element.simpleName.toString() == "drawable" }?.let { drawableClass ->
-            val superDrawableClassName = ClassName(
-                    packageName = packageName,
-                    simpleName = "SuperR",
-                    simpleNames = "Drawable"
-            )
-            val superDrawableClass = TypeSpec.classBuilder(className = superDrawableClassName)
-                    .superclass(rKtClassName.nestedClass("Image"))
+            val drawableClassName = rClassName.nestedClass("Drawable")
+            val drawablesClass = TypeSpec.classBuilder(className = drawableClassName)
+                    .superclass(baseRClassName.nestedClass("Drawables"))
                     .primaryConstructor(
                             FunSpec.constructorBuilder()
                                     .addParameters(
                                             listOf(
-                                                    ParameterSpec.builder("context", Context::class).build(),
-                                                    ParameterSpec.builder("id", Int::class).build()
+                                                    ParameterSpec.builder("context", Context::class).build()
                                             )
                                     )
                                     .build()
                     )
-                    .addSuperclassConstructorParameter("context, id")
+                    .addSuperclassConstructorParameter("context")
                     .build()
-            val drawableProperty = PropertySpec.builder("drawable", superDrawableClassName, KModifier.PUBLIC)
-            drawableProperty.initializer(CodeBlock.of("%T(context = context)", superDrawableClassName))
+            val drawableProperty = PropertySpec.builder("drawable", drawableClassName, KModifier.PUBLIC)
+            drawableProperty.initializer(CodeBlock.of("%T(context = context)", drawableClassName))
             rKtClass.addProperty(drawableProperty.build())
-            rKtClass.addType(superDrawableClass)
+            rKtClass.addType(drawablesClass)
             drawableClass.enclosedElements.forEach { drawableId ->
 
             }
@@ -72,7 +78,7 @@ class RProcessor : AbstractProcessor() {
         KotlinFile.builder(packageName = packageName, fileName = "RKt")
                 .addType(rKtClass.build())
                 .build()
-                .writeTo(FileUtils.getFile(generatedDir, "RKt.kt"))
+                .writeTo(FileUtils.getFile(generatedDir))
         return true
     }
 }
